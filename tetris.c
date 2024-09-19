@@ -20,11 +20,12 @@ typedef struct Block{
 
 int out = 0;
 Block blocks[4];
-double centre[2];
+float centre[2];
+int mode = 5;
 int score = 0;
 int next = 0;
 int HEIGHT;
-float SLEEP = 0;
+float SLEEP = 0;//下落间隔时间
 int board[21][LENGTH];
 
 int if_in(const int array[][2], const int array_length, const int y, const int x){
@@ -220,6 +221,37 @@ int try_fall(){
     return 0;
 }
 
+//保存当前游戏进度
+void save(){
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    FILE* fp;
+    if((fp = fopen("prev.dat","wb")) == NULL){
+        go_to_x_y(0,3+HEIGHT);
+        SetConsoleTextAttribute(hConsole,0x07);
+        printf("Failed to save this step. New attempts will be made later.\n");
+    }else{
+        go_to_x_y(0,3+HEIGHT);
+        SetConsoleTextAttribute(hConsole,0x07);
+        printf("                                                          \n");
+        /*
+        数据保存顺序：
+        1.游戏面板
+        2.可控方块信息
+        3.绕转中心位置
+        4.当前分数
+        5.下一种方块的类型
+        6.难度
+        */
+        fwrite(board,sizeof(board),1,fp);
+        fwrite(blocks,sizeof(Block),4,fp);
+        fwrite(centre,sizeof(float),2,fp);
+        fwrite(&score,sizeof(int),1,fp);
+        fwrite(&next,sizeof(int),1,fp);
+        fwrite(&mode,sizeof(int),1,fp);
+        fclose(fp);
+    }
+}
+
 //仅在try_fall()返回True时被调用，进行得分与层的消除
 void try_score(){
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -358,25 +390,34 @@ void structure(int block_type){
 
 //游戏面板输出
 void print_board(){
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     system("cls");
-    printf("┌");
+
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole,0x88);
+
+    go_to_x_y(0,0);
+    printf("  ");
     for(int i=0;i<LENGTH;i++){
-        printf("─");
+        printf("  ");
     }
-    printf("┐\n");
+    printf("  ");
     for(int i=0;i<HEIGHT;i++){
-        printf("│");
+        go_to_x_y(0,i+1);
+        printf("  ");
         for(int j=0;j<LENGTH;j++){
+            set_color(board[i][j]);
             printf("  ");
         }
-        printf("│\n");
+        SetConsoleTextAttribute(hConsole,0x88);
+        printf("  ");
     }
-    printf("└");
+
+    go_to_x_y(0,HEIGHT+1);
+    printf("  ");
     for(int i=0;i<LENGTH;i++){
-        printf("─");
+        printf("  ");
     }
-    printf("┘\n");
+    printf("  ");
 }
 
 //判断游戏是否须结束
@@ -392,6 +433,7 @@ int if_over(){
 //打印UI操作提示
 void print_ui(int mode){
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole,0x07);
     COORD pos = {2*LENGTH+6,3};
     SetConsoleCursorPosition(hConsole,pos);
     switch(mode){
@@ -517,14 +559,16 @@ void print_next(type){
 //每隔SLEEP秒被调用一次
 void update(){
     if(try_fall()){
+        try_score();
         if(if_over()){
             out = 1;
+    return;
         }
-        try_score();
         structure(next);
         next = rand()%7;
         print_next(next);
     }
+    save();//存档
 }
 
 //将光标移动到控制台(x,y)坐标处
@@ -612,23 +656,161 @@ int choose_mode(){
             }
         }
     }
-
-    switch(choice){
-    case 1:
-        SLEEP = 0.5;HEIGHT = 21;break;
-    case 2:
-        SLEEP = 0.4;HEIGHT = 20;break;
-    case 3:
-        SLEEP = 0.3;HEIGHT = 19;break;
-    case 4:
-        SLEEP = 0.2;HEIGHT = 18;break;
-    }
     return choice;
+}
+
+//尝试打开已有存档，成功返回1，失败返回0
+int load_prev(){
+    FILE* fp;
+    if((fp = fopen("prev.dat","rb"))==NULL){
+        printf("Fail to load saved game. The file may have been damaged or deleted.\n");
+        printf("打开存档失败，存档可能已被删除或损坏。\n\n");
+        Sleep(500);
+
+        printf("Trying to create new game...\n");
+        printf("正在尝试打开新游戏……\n\n");
+        Sleep(500);
+
+        if(!create_new()){
+            return 0;
+        }else{
+            return 1;
+        }
+    }else{
+        /*
+        数据读取顺序：
+        1.游戏面板
+        2.可控方块信息
+        3.绕转中心位置
+        4.当前分数
+        5.下一种方块的类型
+        6.难度
+        */
+        fread(board,sizeof(board),1,fp);
+        fread(blocks,sizeof(Block),4,fp);
+        fread(centre,sizeof(float),2,fp);
+        fread(&score,sizeof(int),1,fp);
+        fread(&next,sizeof(int),1,fp);
+        fread(&mode,sizeof(int),1,fp);
+        fclose(fp);
+        return 1;
+    }
+}
+
+//尝试创建新存档，成功返回1，失败返回0
+int create_new(){
+    FILE* fp;
+    if((fp = fopen("prev.dat","wb"))==NULL){
+        printf("Fail to create new game! Please try again.\n");
+        printf("无法打开新游戏！请重试。\n\n");
+        Sleep(1000);
+        return 0;
+    }else{
+        init_board();
+        structure(rand()%7);
+        next = rand()%7;
+        //TODO
+        fwrite(board,sizeof(board),1,fp);
+        fwrite(blocks,sizeof(Block),4,fp);
+        fwrite(centre,sizeof(float),2,fp);
+        fwrite(&score,sizeof(int),1,fp);
+        fwrite(&next,sizeof(int),1,fp);
+        fwrite(&mode,sizeof(int),1,fp);
+        fclose(fp);
+
+        printf("Succeed to create new game.\n");
+        printf("打开新游戏成功。\n\n");
+        Sleep(1000);
+        fclose(fp);
+
+        //选择游戏难度
+        mode = choose_mode();
+
+        return 1;
+    }
+}
+
+//打印选项
+void print_old_or_new(int choice){
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    switch(choice){
+        case 0:{
+            go_to_x_y(0,5);
+            SetConsoleTextAttribute(hConsole,0xf0);
+            printf("new game");
+            SetConsoleTextAttribute(hConsole,0x0f);
+            printf(" prev game");
+            SetConsoleTextAttribute(hConsole,0x07);
+            printf("\n\n");
+            break;
+        }
+        case 1:{
+            go_to_x_y(0,5);
+            SetConsoleTextAttribute(hConsole,0x0f);
+            printf("new game ");
+            SetConsoleTextAttribute(hConsole,0xf0);
+            printf("prev game");
+            SetConsoleTextAttribute(hConsole,0x07);
+            printf("\n\n");
+            break;
+        }
+    }
+}
+
+//选择打开存档/开启新存档
+int new_or_old(){
+    int out = 0;
+    while(!out){
+        system("cls");
+        printf("Open previous game or create new game?\n");
+        printf("打开旧有存档或开始新游戏?\n\n");
+        printf("a for left, d for right, s for choice.\n");
+        char key = 'w';
+        int choice = 0;
+        print_old_or_new(choice);
+        while(key != 's'){
+            key = _getch();
+            switch(key){
+                case 'a':{
+                    if(choice > 0)choice--;
+                    else choice = 1;
+                    print_old_or_new(choice);
+                    break;
+                }
+                case 'd':{
+                    if(choice < 1)choice++;
+                    else choice = 0;
+                    print_old_or_new(choice);
+                    break;
+                }
+                default:break;
+            }
+        }
+        switch(choice){
+            case 0:{
+                if(create_new())out=1;
+                break;
+            }
+            case 1:{
+                if(load_prev())out=1;
+                break;
+            }
+        }
+    }
+}
+
+//隐藏光标
+void hide_cursor(){
+    CONSOLE_CURSOR_INFO info;
+    info.dwSize = 1;
+    info.bVisible = FALSE;
+    SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE),&info);
 }
 
 //主函数
 int main(){
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    hide_cursor();
 
     printf("Tetris by Github user Leert2024\n");
     printf("俄罗斯方块，开发者Github：Leert2024\n\n");
@@ -658,29 +840,38 @@ int main(){
     printf("按任意键开始游戏……\n");
     _getch();
 
-    int mode = choose_mode();
+    //选择开始新游戏或继续旧有游戏
+    new_or_old();
+    if(mode == 5)mode = choose_mode();
+    switch(mode){
+    case 1:
+        SLEEP = 0.5;HEIGHT = 21;break;
+    case 2:
+        SLEEP = 0.4;HEIGHT = 20;break;
+    case 3:
+        SLEEP = 0.3;HEIGHT = 19;break;
+    case 4:
+        SLEEP = 0.2;HEIGHT = 18;break;
+    }
 
     srand(time(0));
 
-    //初始化游戏面板并打印
-    init_board();
+    //打印游戏面板
     print_board();
     print_ui(mode);
 
-    structure(rand()%7);
-    next = rand()%7;
     print_next(next);
 
     //游戏进行中的循环
     while(out != 1){
-        if(out == 2){
+        if(out == 2){//当游戏暂停时
             COORD pos={0,3+HEIGHT};
             SetConsoleCursorPosition(hConsole,pos);
             SetConsoleTextAttribute(hConsole,0x07);
-            printf("Game paused. Press any key to continue.\n");
+            printf("Game paused. Press any key to continue.                   \n");
             _getch();
             SetConsoleCursorPosition(hConsole,pos);
-            printf("                                       ");
+            printf("                                                          ");
             out = 0;
         }else if(out == 3){
             return 0;
@@ -699,7 +890,7 @@ int main(){
     COORD pos={0,3+HEIGHT};
     SetConsoleCursorPosition(hConsole,pos);
     SetConsoleTextAttribute(hConsole,0x07);
-    printf("Game over! Press any key for exit!\n");
+    printf("Game over! Press any key for exit!\n                                ");
     _getch();
     return 0;
 }
