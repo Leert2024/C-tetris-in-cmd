@@ -1,0 +1,5 @@
+# build文件夹
+build/
+
+# 游戏存档
+bin/prev.dat
